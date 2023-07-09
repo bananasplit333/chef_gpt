@@ -1,6 +1,5 @@
 import os 
 import openai
-import sys
 from dotenv import load_dotenv, find_dotenv
 from IPython.display import display, HTML
 import requests

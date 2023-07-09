@@ -1,24 +1,138 @@
+import json
+import os 
+import openai
+from dotenv import load_dotenv, find_dotenv
+from IPython.display import display, HTML
 import requests
 from bs4 import BeautifulSoup
-import json
 
-#url = "https://www.foodnetwork.com/recipes/rachael-ray/caprese-salad-recipe-1939232"
-#url = "https://www.walderwellness.com/tastes-like-summer-salad-with-fresh-local-ingredients/"
-url = "https://www.maangchi.com/recipe/gat-kimchi"
-#url = "https://www.allrecipes.com/recipe/20144/banana-banana-bread/"
-#url = "https://sweetandsavorymeals.com/korean-beef-bulgogi/"
+#"https://www.bonappetit.com/recipe/pork-shoulder-inasal",
+urls = [
+    "https://www.vkusnyblog.com/recipe/myatnyj-limonad/",
+    "https://www.allrecipes.com/recipe/20144/banana-banana-bread/",
+    "https://www.bonappetit.com/recipe/pork-shoulder-inasal",
+    "https://www.simplyrecipes.com/lamb-skewers-with-haitian-epis-5225102",
+    "https://www.maangchi.com/recipe/gat-kimchi",
+    "https://www.foodnetwork.com/recipes/giant-bacon-cheddar-juicy-lucy-burger-5293471"
+]
 
-def get_ingredients(url="https://www.maangchi.com/recipe/gat-kimchi"):
-    response = requests.get(url)
-    html_content = response.content
-    soup = BeautifulSoup(html_content, "html.parser")
-    #find the json file:  
-    food_details = soup.find('script', {'type':'application/ld+json'}).string
-    json_data = json.loads(food_details)
-    if (json_data[0].get('recipeIngredient')):
-        return json_data[0].get('recipeIngredient')
+
+load_dotenv(find_dotenv())
+openai.api_key = os.environ['OPENAI_API_KEY']
+
+
+
+#extract json-ld from page, convert to dict
+def get_ld_json(url:str) -> dict: 
+    parser="html.parser"
+    headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36'}
+    res=requests.get(url, headers=headers)
+    soup=BeautifulSoup(res.text, parser)
+    script_tag = soup.find("head").find("script", {"type": "application/ld+json"})
+    if script_tag:
+        metadata= json.loads("".join(script_tag.contents))
+        return get_ingredients_from_dict(metadata)
     else:
-        return json_data["@graph"][0].get('recipeIngredient')
-    
+       raise Exception("no script tag found")
 
-print(get_ingredients(url))
+#return the list of ingredients from the dict
+def get_ingredients_from_dict(items) -> list:
+    ingredients = []
+    if isinstance(items, dict):
+       if "recipeIngredient" in items:
+           ingredients = items["recipeIngredient"]
+       else:
+           for key, value in items.items():
+               if isinstance(value, (dict, list)):
+                   ingredients.extend(get_ingredients_from_dict(value))
+    elif isinstance(items, list):
+        for item in items:
+            if isinstance(item, (dict,list)):
+                ingredients.extend(get_ingredients_from_dict(item))
+    return ingredients
+
+
+
+for url in urls:
+    print(f"parsing data from {url}")
+    ingredients = get_ld_json(url)
+    print(ingredients)
+
+
+
+def get_completion_from_messages(
+    messages,
+    model="gpt-3.5-turbo",
+    temperature = 0,
+    max_tokens = 500,
+):
+    response = openai.ChatCompletion.create(
+        model = model,
+        messages = messages,
+        temperature = temperature,
+        max_tokens = max_tokens,
+    )
+    return response.choices
+
+
+delimiter = "####"
+system_message=f"""
+    You will be given a paragraph from a cooking blog. \
+    Extract the ingredients required for the recipe. \
+    First extract the amount, then extract all ingredients, then extract other preparation details about the ingredient. \ 
+    Output the result in an HTML format of unordered lists. Make sure to output every single ingredient in the paragraph. \
+    Each unordered list should only have one ingredient listed.\
+    The customer query will be delimited with {delimiter} characters.\
+    
+    Desired format: 
+    <amount>: tablespoon, teaspoon should be abbreviated to tbsp and tsp. Convert every imperial measurement to metric (except volume).
+    <ingredient name> is concise and does not contain extra details. 
+    <preparation details> has a concise, brief description about the ingredient. For example, "onion finely chopped and diced" would equate to something like "onion, fine dice"
+
+    <amount > <ingredient name>, <(preparation details)>
+    <amount>, <ingredient name>, <(preparation details)>
+    <amount>, <ingredient name>, <(preparation details)>
+    ...
+
+    Remove any trailing commas 
+
+    If amount is of count, remove the comma proceeding it.
+    Do not include brackets. Only output one measurement of each ingredient.
+    """
+    
+user_prompt = f"""
+    General tsos chicken served over a bowl of white rice
+    General Tso’s Chicken is a Chinese takeout go-to. Make it all in one dish in the comfort of your home for a sweet and spicy treat!
+    AD
+    Author: Natalya Drozhzhin
+    Course: Main Course
+    Cuisine: Asian
+    Keyword: general tsos chicken
+    Skill Level: Easy
+    Cost to Make: $10-$12
+    Calories: 386
+    Servings: 8 servings
+    Ingredients
+    2 lb chicken thighs, trimmed and cut into 1-inch pieces
+    1/2 cup corn starch
+    1/4 cup extra light olive oil, for frying, plus more as needed
+    2 tbsp minced ginger, from a 2-inch piece of ginger
+    3 cloves garlic, or 1 Tbsp grated or finely minced
+    1/2 tsp red pepper flakes, or added to taste
+    1 tsp sesame seeds, optional for garnish
+    General Tso's Sauce
+    1/2 cup cold water
+    5 tbsp low sodium soy sauce
+    3 tbsp rice vinegar, or more to taste
+    1 1/2 tbsp hoisin sauce
+    4 tbsp granulated sugar
+    1 1/2 tbsp cornstarch
+    """
+messages = [
+    {'role': 'system', 'content': system_message},
+    {'role': 'user', 'content': f"{delimiter}{user_prompt}{delimiter}"}
+]
+
+#response = get_completion_from_messages(messages)
+#print(response)
+#display(HTML(response))

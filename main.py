@@ -9,17 +9,17 @@ The translation query will be delimited with {delimiter} characters.
 """
 
 def main():
-    pdf_location = "/Users/jhy/Documents/School/3331/penis.pdf"
+    pdf_location = "/Users/jhy/Documents/School/3331/example.pdf"
     parsed_data = parse_pdf_data(pdf_location)
     
     # Print the parsed data
     print('parsing data:')
     for page_text in parsed_data:
-        #messages = [
-        #    {'role': 'system', 'content': system_message},
-        #    {'role': 'user', 'content': page_text}
-        #]
-        print(page_text)
+        messages = [
+            {'role': 'system', 'content': system_message},
+            {'role': 'user', 'content': page_text}
+        ]
+        print(translator.translate(messages))
 
 if __name__ == '__main__':
     main()
