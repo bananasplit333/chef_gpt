@@ -6,14 +6,17 @@ from IPython.display import display, HTML
 import requests
 from bs4 import BeautifulSoup
 
-#"https://www.bonappetit.com/recipe/pork-shoulder-inasal",
+#
 urls = [
     "https://www.vkusnyblog.com/recipe/myatnyj-limonad/",
     "https://www.allrecipes.com/recipe/20144/banana-banana-bread/",
     "https://www.bonappetit.com/recipe/pork-shoulder-inasal",
     "https://www.simplyrecipes.com/lamb-skewers-with-haitian-epis-5225102",
-    "https://www.maangchi.com/recipe/gat-kimchi",
-    "https://www.foodnetwork.com/recipes/giant-bacon-cheddar-juicy-lucy-burger-5293471"
+    "https://www.maangchi.com/recipe/gat-kimchi", 
+    "https://www.errenskitchen.com/chinese-chicken-broccoli/",
+    "https://thewoksoflife.com/kung-pao-chicken/",
+    "https://www.bonappetit.com/recipe/pork-shoulder-inasal",
+    "https://www.foodnetwork.com/recipes/food-network-kitchen/slow-cooker-chicken-noodle-soup-3364248 "
 ]
 
 
@@ -23,20 +26,20 @@ openai.api_key = os.environ['OPENAI_API_KEY']
 
 
 #extract json-ld from page, convert to dict
-def get_ld_json(url:str) -> dict: 
+def get_ingredients(url:str) -> dict: 
     parser="html.parser"
     headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36'}
     res=requests.get(url, headers=headers)
     soup=BeautifulSoup(res.text, parser)
-    script_tag = soup.find("head").find("script", {"type": "application/ld+json"})
+    script_tag = soup.find("script", {"type": "application/ld+json"})
     if script_tag:
         metadata= json.loads("".join(script_tag.contents))
-        return get_ingredients_from_dict(metadata)
+        return parse_dictionary(metadata)
     else:
        raise Exception("no script tag found")
 
 #return the list of ingredients from the dict
-def get_ingredients_from_dict(items) -> list:
+def parse_dictionary(items) -> list:
     ingredients = []
     if isinstance(items, dict):
        if "recipeIngredient" in items:
@@ -44,21 +47,12 @@ def get_ingredients_from_dict(items) -> list:
        else:
            for key, value in items.items():
                if isinstance(value, (dict, list)):
-                   ingredients.extend(get_ingredients_from_dict(value))
+                   ingredients.extend(parse_dictionary(value))
     elif isinstance(items, list):
         for item in items:
             if isinstance(item, (dict,list)):
-                ingredients.extend(get_ingredients_from_dict(item))
+                ingredients.extend(parse_dictionary(item))
     return ingredients
-
-
-
-for url in urls:
-    print(f"parsing data from {url}")
-    ingredients = get_ld_json(url)
-    print(ingredients)
-
-
 
 def get_completion_from_messages(
     messages,
@@ -72,8 +66,7 @@ def get_completion_from_messages(
         temperature = temperature,
         max_tokens = max_tokens,
     )
-    return response.choices
-
+    return response.choices[0].message["content"]
 
 delimiter = "####"
 system_message=f"""
@@ -128,11 +121,16 @@ user_prompt = f"""
     4 tbsp granulated sugar
     1 1/2 tbsp cornstarch
     """
-messages = [
+
+print("Welcome to the recipe parser!")
+for url in urls:
+    user_prompt = get_ingredients(url)
+    messages = [
     {'role': 'system', 'content': system_message},
     {'role': 'user', 'content': f"{delimiter}{user_prompt}{delimiter}"}
-]
-
+    ]
+    response = get_completion_from_messages(messages)
+    print(response)
 #response = get_completion_from_messages(messages)
 #print(response)
 #display(HTML(response))
