@@ -5,6 +5,10 @@ from IPython.display import display, HTML
 import requests
 from bs4 import BeautifulSoup
 
+#API key
+load_dotenv(find_dotenv())
+openai.api_key = os.environ['OPENAI_API_KEY']
+
 url = "https://www.maangchi.com/recipe/gat-kimchi"
 url = "https://www.allrecipes.com/recipe/20144/banana-banana-bread/"
 response = requests.get(url)
@@ -14,10 +18,6 @@ soup = BeautifulSoup(html_content, "html.parser")
 #resultset item 
 food_details = soup.find_all('script', {'type':'application/ld+json'})
 
-
-
-load_dotenv(find_dotenv())
-openai.api_key = os.environ['OPENAI_API_KEY']
 
 def get_completion_from_messages(
     messages,
