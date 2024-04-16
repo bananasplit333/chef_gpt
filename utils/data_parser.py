@@ -3,10 +3,9 @@ import requests
 from .chat_completion import groq_completion_request
 from bs4 import BeautifulSoup
 
-
-
 #extract contents from url 
 def extract_text_from_url(url):
+    print(url)
     try:
         # Headers for bs
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -20,71 +19,79 @@ def extract_text_from_url(url):
         # Find the JSON-LD script
         script_tag = soup.find('script', type='application/ld+json')
 
+        #JSON-LD FOUND 
         if script_tag:
             json_data = script_tag.string
             data = json.loads(json_data)
-            return data
+            
+            #get the ingredients from filtered data 
+            ingredients = extract_ingredients(data)
+
+            #get the rough instructions from filtered data 
+            instructions = extract_instructions(data)
+            #further filtering 
+            filtered_instructions = clean_instructions(instructions)
+            print(filtered_instructions)
+
+            #compile into object to return 
+            data_obj = {'ingredients':list(ingredients), 'cooking_instructions':filtered_instructions}
+            print("DATA OBJ:")
+            print(data_obj)
+            return data_obj
         else:
             print('JSON-LD data not found')
+            return ValueError
     except requests.exceptions.RequestException as e:
         print(f"Error occurred while fetching the URL: {e}")
         return None
 
+def extract_ingredients(obj):
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == 'recipeIngredient':
+                yield value
+            else:
+                yield from extract_ingredients(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            yield from extract_ingredients(item)
 
-#extract ingredients from json object 
-def extract_recipe_ingredients(json_data):
+def extract_instructions(obj):
+    instructions = []
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == 'recipeInstructions':
+                instructions.append(value)
+            else:
+                instructions.extend(extract_instructions(value))
+    elif isinstance(obj, list):
+        for item in obj:
+            instructions.extend(extract_instructions(item))
+    return instructions
+
+#clean instructions from the json object 
+def clean_instructions(extracted_instructions):
     # Set system message 
     messages = [
         {
             "role": "system",
             "content": """You are a helpful JSON extractor bot that will be given some JSON data.
-                            Specifically, you will be responsible for looking at JSON-LD data and extracting the values for the ingredients list AND cooking instructions from the table.  
+                            Specifically, you will be responsible for extracting the values for the cooking instructions from the table.  
                             Please extract the text and return it in this format:
                             
+                            **
                             {
-                            'ingredients': ['chicken breast', '2 eggs', '3 lb potatoes']
+                            "cooking_instructions": [instructions...]
                             },
-                            
+                            **
+
                             Please make sure to only include the relevant text. Try to filter out any newspace or @type, or "howtostep"
                             """
 
         },
         {
             "role": "user",
-            "content": json.dumps(json_data)
-        }
-    ]
-    #call chat completion 
-    try: 
-        chat_completion = groq_completion_request(messages=messages, tool_choice="none")
-        return chat_completion.choices[0].message.content
-    #chat completion not completed 
-    except Exception as e: 
-        print("Unable to extract ingredients")
-        print(f"Exception: {e}")
-        return e
-
-#extract instructions from the json object 
-def extract_instructions(json_data):
-    # Set system message 
-    messages = [
-        {
-            "role": "system",
-            "content": """You are a helpful JSON extractor bot that will be given some JSON data.
-                            Specifically, you will be responsible for looking at JSON-LD data and extracting the values for the ingredients list AND cooking instructions from the table.  
-                            Please extract the text and return it in this format:
-                            
-                            {
-                            'cooking_instructions': ['finely dice some onions', 'salt some water, put it to a boil in a pot.', 'add some peppers', ...]
-                            },
-                            
-                            Please make sure to only include the relevant text. Try to filter out any newspace or @type, or "howtostep"
-                            """
-
-        },
-        {
-            "role": "user",
-            "content": json.dumps(json_data)
+            "content": str(extracted_instructions)
         }
     ]
     #call chat completion 
@@ -96,3 +103,4 @@ def extract_instructions(json_data):
         print("Unable to extract cooking instructions")
         print(f"Exception: {e}")
         return e
+
