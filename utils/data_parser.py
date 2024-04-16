@@ -26,7 +26,9 @@ def extract_text_from_url(url):
             
             #get the ingredients from filtered data 
             ingredients = extract_ingredients(data)
-
+            print("INGREDIENTS")
+            print(ingredients)
+            filtered_ingredients = clean_ingredients(ingredients)
             #get the rough instructions from filtered data 
             instructions = extract_instructions(data)
             #further filtering 
@@ -69,6 +71,29 @@ def extract_instructions(obj):
             instructions.extend(extract_instructions(item))
     return instructions
 
+def clean_ingredients(extracted_ingredients):
+    messages = [
+         {
+            "role": "system",
+            "content": """You are a helpful JSON extractor bot that will be given some JSON data.
+                            Specifically, you will be responsible for extracting the values for the cooking instructions from the table.  
+                            Please extract the text and return it in this format:
+                            
+                            **
+                            {
+                            "'ingredients': ['onions, sliced', '2 lb potatoes', ...]
+                            },
+                            **
+
+                            Please make sure to only include the relevant text. Try to filter out any newspace or @type, or "howtostep"
+                            """
+
+        },
+        {
+            "role": "user",
+            "content": str(extract_ingredients)
+        }
+    ]
 #clean instructions from the json object 
 def clean_instructions(extracted_instructions):
     # Set system message 
