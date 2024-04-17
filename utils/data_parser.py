@@ -24,19 +24,17 @@ def extract_text_from_url(url):
         if script_tag:
             json_data = script_tag.string
             data = json.loads(json_data)
-            print("paring parameters...")
             #extract necessary data
+            image_url = extract_value(data, 'thumbnailUrl')
             ingredients = extract_value(data, 'recipeIngredient')
             instructions = extract_value(data, 'recipeInstructions')
             name = extract_value(data, 'headline')
             prepTime = extract_value(data, 'prepTime')
             cookTime = extract_value(data, 'cookTime')
             recipe_yield = extract_value(data, 'recipeYield')
-            print(f'yields {recipe_yield}')
-            print(f'TITLE : {name}')
-            print(prepTime)
             #clean instructions 
             filtered_instructions = clean_instructions(instructions)
+            #filtered_ingredients = clean_ingredients(ingredients)
             filtered_cookTime = clean_timing(str(cookTime))
             filtered_prepTime = clean_timing(str(prepTime))
             
@@ -44,6 +42,7 @@ def extract_text_from_url(url):
             
 
             data_obj = {
+                'img_url' : image_url if image_url else None,
                 'ingredients': ingredients if ingredients else None,
                 'cooking_instructions': filtered_instructions if filtered_instructions else None,
                 'name': name if name else None,
@@ -51,7 +50,8 @@ def extract_text_from_url(url):
                 'cook_time': filtered_cookTime if filtered_cookTime else None,
                 'recipe_yield': recipe_yield if recipe_yield else None
             }
-
+            print("FINAL DATA OBJ")
+            print(data_obj)
             return data_obj
         else:
             print('JSON-LD data not found')
@@ -104,12 +104,13 @@ def clean_ingredients(extracted_ingredients):
          {
             "role": "system",
             "content": """You are a helpful JSON extractor bot that will be given some JSON data.
-                            Specifically, you will be responsible for extracting the values for the cooking instructions from the table.  
-                            Please extract the text and return it in this format:
-                            
+                            Specifically, you will be responsible for cleaning up the values of a given obj:
+                            Go through the object and for any measurements that have fractions, encapsulate them in double quotes ""
+                            An example is given below
+
                             **
                             {
-                            "'ingredients': ['onions, sliced', '2 lb potatoes', ...]
+                            "'ingredients': ['"1/4" cup onions, sliced', '2 "1/2" lb potatoes', ...]
                             },
                             **
 
