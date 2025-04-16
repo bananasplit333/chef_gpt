@@ -18,8 +18,6 @@ def result():
         url = request.args.get('url')
         print(f'URL: {url}')
         result = kickoff(url)
-        print('result')
-        print(result)
         if result:
             return result 
         else:

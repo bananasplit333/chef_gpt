@@ -30,60 +30,79 @@ options.add_argument('--disable-blink-features=AutomationControlled')  # Avoid b
 #extract contents from url 
 def extract_text_from_url(url):
     print(url)
-
-    ## Set up Chrome options to mimic real human behavior
     # Initialize driver
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
         # Load the page
         driver.get(url)
-        time.sleep(5)  # wait for cloudflare checks / website loading
+        time.sleep(5)  # Wait for Cloudflare checks and page load (adjust as needed)
 
         # Get the rendered page source
         page_source = driver.page_source
         soup = BeautifulSoup(page_source, 'html.parser')
+
+        # Find the JSON-LD script
+        script_tag = soup.find('script', type='application/ld+json')
+        #JSON-LD FOUND 
+        # if script_tag is None:
+        #     json_data = script_tag.string
+        #     data = json.loads(json_data)
+        #     #extract necessary data
+        #     image_url = extract_value(data, 'thumbnailUrl')
+        #     ingredients = extract_value(data, 'recipeIngredient')
+        #     instructions = extract_value(data, 'recipeInstructions')
+        #     name = extract_value(data, 'headline')
+        #     prepTime = extract_value(data, 'prepTime')
+        #     cookTime = extract_value(data, 'cookTime')
+        #     recipe_yield = extract_value(data, 'recipeYield')
+        #     #clean instructions 
+        #     filtered_instructions = clean_instructions(instructions)
+        #     #filtered_ingredients = clean_ingredients(ingredients)
+        #     filtered_cookTime = clean_timing(str(cookTime))
+        #     filtered_prepTime = clean_timing(str(prepTime))
+            
+        #     print(f'prep_time {filtered_prepTime}')
+            
+
+        #     data_obj = {
+        #         'img_url' : image_url if image_url else None,
+        #         'ingredients': ingredients if ingredients else None,
+        #         'cooking_instructions': filtered_instructions if filtered_instructions else None,
+        #         'name': name if name else None,
+        #         'prep_time': filtered_prepTime if filtered_prepTime else None,
+        #         'cook_time': filtered_cookTime if filtered_cookTime else None,
+        #         'recipe_yield': recipe_yield if recipe_yield else None
+        #     }
+        #     print("FINAL DATA OBJ")
+        #     print(data_obj)
+        #     return data_obj
+
+        #JSON-LD NOT FOUND
         text = soup.get_text()
         text_chunks = split_into_chunks(text, chunk_size=100)
-        
-        # extracct json LD data 
-        script_tag = soup.find('script', type='application/ld+json')
-        web_strings = script_tag.string 
-        data = json.loads(web_strings)
-        image_url = extract_value(data, 'thumbnailUrl')
-        name = extract_value(data, 'headline')
-
         if (text_chunks):
+            print('Text chunks found')
+            print('filtering text chunks...')
             filtered_chunk = get_recipe_chunks(text_chunks)
             print('filtered chunk len:', len(filtered_chunk))
-
-            #get recipe info from chunks
-            recipe_info = extract_recipe("".join(filtered_chunk))
-            json_data = json.loads(recipe_info)
+            t= clean_testerino("".join(filtered_chunk))
+            json_data = json.loads(t)
             #extract necessary data
-            title = json_data.get('title', None)
             recipeYield = json_data.get('yield', None)
-            ingredients = json_data.get('ingredients', None)    
-            washed_vegetables = wash_vegetables(ingredients)
-            print('vegetables have been washed, ', washed_vegetables)
-            instructions = json_data.get('cooking_instructions', None)
+            ingredients = json_data.get('ingredients', None)
+            instructions = json_data.get('instructions', None)
             prepTime = json_data.get('prep_time', None)
             cookTime = json_data.get('cook_time', None)
-            totalTime = json_data.get('total_time', None)
             name = json_data.get('name', None)
-            data_obj = {
-                'img_url': image_url if image_url else None,
-                'ingredients': washed_vegetables if washed_vegetables else None,
-                'cooking_instructions': instructions if instructions else None,
-                'name': name if name else title if title else None,
-                'prep_time': prepTime if prepTime else None,
-                'cook_time': cookTime if cookTime else None,
-                'recipe_yield': recipeYield if recipeYield else None,
-                'total_time': totalTime if totalTime else None,
-            }
 
-            print('data obj', data_obj)
-            return data_obj
+            print(f"Recipe Name: {name}")
+            print(f"Yield: {recipeYield}")
+            print(f"Ingredients: {ingredients}")
+            print(f"Instructions: {instructions}")
+            print(f"Prep Time: {prepTime}")
+            print(f"Cook Time: {cookTime}")
+            return json_data
         else:
             print('JSON-LD data not found')
             return ValueError
@@ -92,16 +111,6 @@ def extract_text_from_url(url):
         return None
     finally:
         driver.quit()
-
-def wash_vegetables(ingredients): 
-    quantity_pattern = re.compile(r'\d+\s\d+/\d+|\d+/\d+|\d+|[¼-¾⅐-⅟]')
-    for item in ingredients: 
-        temp = item.get('quantity', '')
-        matches = quantity_pattern.findall(temp)
-        item['quantity'] = ' '.join(matches) if matches else ''
-    
-    return ingredients
-
 
 def extract_first_number(string):
     match = re.search(r'\d+', string)
@@ -199,23 +208,14 @@ def clean_ingredients(extracted_ingredients):
     ]
 
 #clean instructions from the json object 
-def extract_recipe(extracted_instructions):
+def clean_testerino(extracted_instructions):
     # Set system message 
     messages = [
         {
             "role": "system",
             "content": """You are a helpful ingredient extractor bot that will be given some data.
                             Specifically, you will be responsible for extracting the values for the cooking instructions from the table.
-                            Please extract the text and return it in a JSON format. 
-                            For each ingredient, make sure to separate the ingredient name, quantity and unit from each other.
-                            For quantity, make sure to include only numbers and fractions. Do not include any text.
-                            For example, "2 cups soy sauce" should be separated into: 
-                            {
-                                "ingredient": "soy sauce",
-                                "quantity": "2",
-                                "unit": "cups"
-                            }
-
+                            Please extract the text and return it in this format:
                             
                             **
                             {
@@ -228,10 +228,7 @@ def extract_recipe(extracted_instructions):
                                 1. instructions
                                 2. instructions
                                 3. instructions...]
-                            "ingredients": [
-                                {"ingredient": "...", "quantity": "...", "unit": "cups, tbsp, tsp......"},
-                                {"ingredient": "...", "quantity": "...", "unit": "..."},
-                                {"ingredient":, "quantity":, "unit": }...]
+                            "ingredients": [ingredients...]
                             },
                             **
 
@@ -318,7 +315,7 @@ def is_recipe_chunk(chunk, keywords = RECIPE_KEYWORDS, threshold = 6):
     return keyword_count >= threshold 
 
 def get_recipe_chunks(chunk):
-    res = [] 
+    res = []
     for chunks in chunk:
         if is_recipe_chunk(chunks):
             res.append(chunks)
