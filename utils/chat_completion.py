@@ -6,7 +6,7 @@ from tenacity import retry, wait_random_exponential, stop_after_attempt
 #load API 
 load_dotenv()
 groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
-GROQ_MODEL = "llama3-70b-8192"
+GROQ_MODEL = "deepseek-r1-distill-llama-70b"
 
 @retry(wait=wait_random_exponential(multiplier=1, max=40), stop=stop_after_attempt(3))
 def groq_completion_request(messages, tools=None, tool_choice=None, model=GROQ_MODEL):

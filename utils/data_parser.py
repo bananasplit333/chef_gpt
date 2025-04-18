@@ -8,15 +8,38 @@ from webdriver_manager.chrome import ChromeDriverManager
 from .chat_completion import groq_completion_request, groq_completion_request_basic
 from bs4 import BeautifulSoup
 from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
-
+from fractions import Fraction
+import cloudscraper
 
 RECIPE_KEYWORDS = [
-    "ingredient", "preheat", "mix", "bake", "heat", "whisk", "cook", "stir", "oven", "boil", "simmer",
-    "chop", "slice", "dice", "grate", "blend", "pour", "add", "season", "garnish", "serve", "chill",
+    "ingredient", "preheat", "mix", "bake", "heat", "whisk", "cook", "stir", "oven", "boil", "simmer", "servings"
+    "chop", "slice", "dice", "grate", "blend", "pour", "add", "season", "garnish", "serve", "chill", "total time"
     "marinate", "fry", "roast", "grill", "steam", "sauté", "caramelize", "reduce", "knead", "fold",    
     "cup", "tsp", "tbsp", "teaspoon", "tablespoon", "min", "hour", "serve", "degrees", "serves", "yield", "cooking time",
     "prep time", "cook time", "recipe", "instructions", "method", "directions", "how to", "step", "procedure",
 ]
+
+unicode_fraction_map = {
+    '¼': 0.25,
+    '½': 0.5,
+    '¾': 0.75,
+    '⅐': 1/7,
+    '⅑': 1/9,
+    '⅒': 1/10,
+    '⅓': 1/3,
+    '⅔': 2/3,
+    '⅕': 1/5,
+    '⅖': 2/5,
+    '⅗': 3/5,
+    '⅘': 4/5,
+    '⅙': 1/6,
+    '⅚': 5/6,
+    '⅛': 1/8,
+    '⅜': 3/8,
+    '⅝': 5/8,
+    '⅞': 7/8,
+    '⅟': 1.0,
+}
 
 # Set up Chrome options to mimic a real browser
 options = webdriver.ChromeOptions()
@@ -36,54 +59,47 @@ def extract_text_from_url(url):
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        # Load the page
-        driver.get(url)
-        time.sleep(5)  # wait for cloudflare checks / website loading
-
-        # Get the rendered page source
-        page_source = driver.page_source
-        soup = BeautifulSoup(page_source, 'html.parser')
+        data = fetch_html(url)
+        soup = BeautifulSoup(data, 'html.parser')
         text = soup.get_text()
+        print('text retrieved... splitting....')
         text_chunks = split_into_chunks(text, chunk_size=100)
         
-        # extracct json LD data 
+        # extract json LD data 
+        
         script_tag = soup.find('script', type='application/ld+json')
-        web_strings = script_tag.string 
-        data = json.loads(web_strings)
-        image_url = extract_value(data, 'thumbnailUrl')
-        name = extract_value(data, 'headline')
+        meta_tag = soup.find('meta', property='og:image')
+        image_url = meta_tag["content"]
+        print("meta tag : ", meta_tag)
+        if (script_tag):
+            web_strings = script_tag.string 
+            data = json.loads(web_strings)
+            img_data = extract_value(data, 'thumbnailUrl')
+            if (len(img_data) > 0):
+                image_url = img_data
+            name = extract_value(data, 'headline') or ""
 
+        print('image url::::', image_url)
         if (text_chunks):
             filtered_chunk = get_recipe_chunks(text_chunks)
-            print('filtered chunk len:', len(filtered_chunk))
-
+            print("potential chunks:", len(filtered_chunk))
+            
             #get recipe info from chunks
             recipe_info = extract_recipe("".join(filtered_chunk))
             json_data = json.loads(recipe_info)
-            #extract necessary data
-            title = json_data.get('title', None)
-            recipeYield = json_data.get('yield', None)
-            ingredients = json_data.get('ingredients', None)    
-            washed_vegetables = wash_vegetables(ingredients)
-            print('vegetables have been washed, ', washed_vegetables)
-            instructions = json_data.get('cooking_instructions', None)
-            prepTime = json_data.get('prep_time', None)
-            cookTime = json_data.get('cook_time', None)
-            totalTime = json_data.get('total_time', None)
-            name = json_data.get('name', None)
-            data_obj = {
-                'img_url': image_url if image_url else None,
-                'ingredients': washed_vegetables if washed_vegetables else None,
-                'cooking_instructions': instructions if instructions else None,
-                'name': name if name else title if title else None,
-                'prep_time': prepTime if prepTime else None,
-                'cook_time': cookTime if cookTime else None,
-                'recipe_yield': recipeYield if recipeYield else None,
-                'total_time': totalTime if totalTime else None,
-            }
-
-            print('data obj', data_obj)
-            return data_obj
+            if (json_data):
+                print('json data received, parsing json...')
+                try: 
+                    res = parse_json(json_data)
+                    if (not res.get("name") and name): 
+                        res["name"] = name
+                    res["img_url"] = image_url
+                    print('img_url', image_url)
+                    print('res : image url:::::', res["img_url"])
+                    return res 
+                except Exception as e: 
+                    print("failed parsing json")
+                    return FileNotFoundError
         else:
             print('JSON-LD data not found')
             return ValueError
@@ -93,15 +109,80 @@ def extract_text_from_url(url):
     finally:
         driver.quit()
 
-def wash_vegetables(ingredients): 
-    quantity_pattern = re.compile(r'\d+\s\d+/\d+|\d+/\d+|\d+|[¼-¾⅐-⅟]')
-    for item in ingredients: 
-        temp = item.get('quantity', '')
-        matches = quantity_pattern.findall(temp)
-        item['quantity'] = ' '.join(matches) if matches else ''
-    
-    return ingredients
+def fetch_html(url: str, timeout: int = 15) -> str:
+    # create a session that automatically handles Cloudflare challenges
+    scraper = cloudscraper.create_scraper(
+        browser={'custom': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    )
+    response = scraper.get(url, timeout=timeout)
+    response.raise_for_status()
+    return response.text
 
+def parse_json(json_data):
+    #extract necessary data
+    title = json_data.get('title', None)
+    recipeYield = json_data.get('yield', None)
+    ingredients = json_data.get('ingredients', None)
+    washed_vegetables = wash_vegetables(ingredients)
+    instructions = json_data.get('cooking_instructions', None)
+    prepTime = json_data.get('prep_time', None)
+    cookTime = json_data.get('cook_time', None)
+    totalTime = json_data.get('total_time', None)
+
+    #declare data obj 
+    data_obj = {
+        'name': title,
+        'ingredients': washed_vegetables,
+        'cooking_instructions': instructions,
+        'prep_time': prepTime,
+        'cook_time': cookTime,
+        'recipe_yield': recipeYield,
+        'total_time': totalTime,
+    }
+
+    return data_obj
+
+def wash_vegetables(ingredients):
+    try:
+        quantity_pattern = re.compile(r'\d+\s\d+/\d+|\d+/\d+|\d+|[¼-¾⅐-⅟]')
+        for item in ingredients: 
+            temp = item.get('quantity', '')
+            matches = quantity_pattern.findall(temp)
+            match = ' '.join(matches) if matches else ''
+            qty = convert_to_decimal(match)
+            item['quantity'] = qty 
+        
+        return ingredients
+    except Exception as e:
+        print('error washing vegetables')
+        return None
+
+def convert_to_decimal(number):
+    number = number.strip()
+    try:
+        #mixed unicode
+        parts = number.split() 
+        if len(parts) == 2 and parts[1] in unicode_fraction_map: 
+            return int(parts[0]) + unicode_fraction_map[parts[1]] 
+        
+        #single unicode fraction
+        if (number in unicode_fraction_map):
+            return unicode_fraction_map[number]
+        
+        #mixed fraction (3 3/4)
+        if ' ' in number: 
+            whole, frac = number.split()
+            return int(whole) + float(Fraction(frac))
+        
+        #simple decimal (3/4)
+        if '/' in number:
+            return float(Fraction(number))
+        
+        #regular whole number
+        return number
+    except Exception as e:
+        print('error converting to decimals')
+        return None
 
 def extract_first_number(string):
     match = re.search(r'\d+', string)
@@ -127,9 +208,13 @@ def extract_ingredients(obj):
 
 #split into chunks 
 def split_into_chunks(text, chunk_size): 
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
-    texts = text_splitter.split_text(text)
-    return texts
+    try:
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+        texts = text_splitter.split_text(text)
+        return texts
+    except Exception as e:
+        print(f"Error occurred while splitting text into chunks: {e}")
+        return None
 
 def extract_relevant_content(text): 
     #set system message
@@ -171,7 +256,7 @@ def extract_value(obj, key):
             result = extract_value(item, key)
             if result is not None:
                 return result
-    return None
+    return ""
 
 def clean_ingredients(extracted_ingredients):
     messages = [
@@ -200,6 +285,7 @@ def clean_ingredients(extracted_ingredients):
 
 #clean instructions from the json object 
 def extract_recipe(extracted_instructions):
+    print('extract recipe')
     # Set system message 
     messages = [
         {
@@ -215,21 +301,22 @@ def extract_recipe(extracted_instructions):
                                 "quantity": "2",
                                 "unit": "cups"
                             }
-
+                            Please make sure to follow the format below. Make sure to double check that you are pulling in the serving size, 
+                            and the cooking & prep times.
                             
                             **
                             {
-                            "title": "...",
-                            "yield": "... servings",
-                            "prep_time": "... min",
-                            "cook_time": "... min",
-                            "total_time": "... min",
+                            "title": "Dumplings and soy sauce",
+                            "yield": "3",
+                            "prep_time": "",
+                            "cook_time": "",
+                            "total_time": "",
                             "cooking_instructions": [
                                 1. instructions
                                 2. instructions
                                 3. instructions...]
                             "ingredients": [
-                                {"ingredient": "...", "quantity": "...", "unit": "cups, tbsp, tsp......"},
+                                {"ingredient": "...", "quantity": "...", "unit": "cups, tbsp, tsp, oz, g, lb, kg......"},
                                 {"ingredient": "...", "quantity": "...", "unit": "..."},
                                 {"ingredient":, "quantity":, "unit": }...]
                             },
@@ -318,6 +405,7 @@ def is_recipe_chunk(chunk, keywords = RECIPE_KEYWORDS, threshold = 6):
     return keyword_count >= threshold 
 
 def get_recipe_chunks(chunk):
+    print('get recipe chunks')
     res = [] 
     for chunks in chunk:
         if is_recipe_chunk(chunks):
